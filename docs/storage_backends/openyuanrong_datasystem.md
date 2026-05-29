@@ -145,7 +145,7 @@ backend:
 - `metastore_port`: Port for metastore service on the head node.
 - `worker_args`: Additional arguments passed to `dscli start` command:
   - `--shared_memory_size_mb`: Shared memory size in MB for datasystem worker.
-  - `--enable_huge_tlb`: Configure huge page memory to reduce TLB misses and improve memory access efficiency. Note: may cause system memory shortage, kernel OOM, or system instability.  **Please allocate huge pages before starting datasystem** - refer to [Huge Page Guide](https://pages.openeuler.openatom.cn/openyuanrong-datasystem/docs/zh-cn/latest/appendix/hugepage_guide.html).
+  - `--enable_huge_tlb`: Configure huge page memory to reduce TLB misses and improve memory access efficiency. Note: may cause system memory shortage, kernel OOM, or system instability.  **Please allocate huge pages before starting datasystem** - refer to [Huge Page Guide](https://pages.openeuler.openatom.cn/openyuanrong-datasystem/docs/zh-cn/latest/appendix/hugepage_guide.html). Before enabling, OS config required (root privilege): `sysctl -w vm.nr_hugepages=<count>` (each page is 2MB, e.g. 65536 for 128GB) and `ulimit -l unlimited` (allow pinning enough memory for RDMA/Ascend).
 
 **NPU Transfer Options:**
 - `enable_yr_npu_transport`: Enable NPU transport for high-performance device-to-device data transfer. Set to `true` when using NPU tensors.
@@ -155,7 +155,7 @@ backend:
 **RDMA Options:**
 - `enable_rdma`: Whether to enable host RDMA (H2H) transport via UCX. Requires RDMA-capable NIC hardware and `rdma-core` driver on all nodes. When enabled, TQ automatically adds `--enable_rdma true` to the dscli startup command and defaults `UCX_TLS=rc_x` in the subprocess environment. RDMA H2H and RH2D (NPU cross-node) can be enabled simultaneously — they are **not** mutually exclusive.
 - `ucx_env_vars`: Dictionary of UCX environment variables passed to the dscli subprocess. These override parent process environment. Common variables:
-  - `UCX_TLS`: RDMA transport mode. Defaults to `rc_x` when `enable_rdma=true` and not specified here. Alternatives: `rc` (compatible), `ud` (low-latency), `dc` (large-scale). See [UCX environment parameters](https://github.com/openucx/ucx/wiki/UCX-environment-parameters).
+  - `UCX_TLS`: RDMA transport mode. Precedence: `ucx_env_vars` > parent env > fallback default `rc_x` (when `enable_rdma=true`). Alternatives: `rc` (compatible), `ud` (low-latency), `dc` (large-scale). See [UCX environment parameters](https://github.com/openucx/ucx/wiki/UCX-environment-parameters).
   - `UCX_LOG_FILE`: Path to UCX log file (e.g., `/tmp/ucx.log`). Requires `UCX_LOG_LEVEL` to be set.
   - `UCX_LOG_LEVEL`: Log verbosity — `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`. Use `DEBUG`/`TRACE` for troubleshooting.
   - `UCX_NET_DEVICES`: RDMA device name (e.g., `mlx5_0:1`). Required in multi-NIC setups.
@@ -323,7 +323,8 @@ dscli start -w --worker_address <HEAD_IP>:31501 \
     --enable_rdma true \
     --arena_per_tenant 1 \
     --enable_worker_worker_batch_get true \
-    --shared_memory_size_mb 8192
+    --shared_memory_size_mb 8192 \
+    --enable_huge_tlb true
 
 # Worker node
 dscli start -w --worker_address <WORKER_IP>:31501 \
@@ -331,8 +332,16 @@ dscli start -w --worker_address <WORKER_IP>:31501 \
     --enable_rdma true \
     --arena_per_tenant 1 \
     --enable_worker_worker_batch_get true \
-    --shared_memory_size_mb 8192
+    --shared_memory_size_mb 8192 \
+    --enable_huge_tlb true
 ```
+
+Parameters:
+- `--enable_rdma true`: Enable RDMA for H2H data transfer between workers.
+- `--arena_per_tenant 1`: Number of shared memory arenas per tenant. Set to 1 for fastest startup; higher values improve first-allocation performance but increase fd usage.
+- `--enable_worker_worker_batch_get true`: Enable batch get between workers for better cross-node transfer throughput.
+- `--shared_memory_size_mb 8192`: Per-node shared memory size in MB. All clients on the same node share this shared memory space.
+- `--enable_huge_tlb true`: Enable huge page memory to reduce TLB misses and accelerate startup/transfer. Before enabling, OS config required (root privilege): `sysctl -w vm.nr_hugepages=<count>` (each page is 2MB) and `ulimit -l unlimited`.
 
 > `UCX_TLS=rc_x` forces RDMA transport — if RDMA is unavailable, the system will error rather than fall back to TCP. For alternative transport modes, see [UCX environment parameters](https://github.com/openucx/ucx/wiki/UCX-environment-parameters).
 
